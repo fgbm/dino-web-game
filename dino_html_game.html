@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Динозаврик — HTML игра</title>
+  <style>
+    :root{--ui-bg:#111;--fg:#eee}
+    html,body{height:100%;margin:0;background:var(--ui-bg);color:var(--fg);font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
+    .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:18px}
+    canvas{background:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.45)}
+    .hud{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .panel{background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;color:#fff}
+    .controls{display:flex;gap:8px}
+    button{background:#2b2b2b;border:none;padding:8px 10px;border-radius:8px;color:#fff;cursor:pointer}
+    button:active{transform:translateY(1px)}
+    .location-label{min-width:110px;text-align:center}
+    .small{font-size:13px;opacity:0.9}
+    .right-col{display:flex;gap:10px;align-items:center}
+
+    /* auth/shop */
+    .side{display:flex;gap:12px;align-items:flex-start}
+    .auth, .shop{background:rgba(255,255,255,0.03);padding:10px;border-radius:10px}
+    .auth input{margin:4px 0;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:var(--fg)}
+    .shop .skins{display:flex;gap:8px}
+    .skin-card{background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;text-align:center;width:110px}
+    .skin-preview{width:48px;height:32px;border-radius:6px;margin:6px auto;border:2px solid rgba(255,255,255,0.06)}
+    @media (max-width:900px){.hud{flex-direction:column;align-items:stretch}.side{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>Динозаврик — HTML игра (в стиле Google T-Rex)</h2>
+
+    <div class="hud">
+      <div class="panel">Счёт: <span id="score">0</span></div>
+      <div class="panel">Рекорд: <span id="best">0</span></div>
+      <div class="panel location-label">Локация: <span id="locName">Пустыня</span></div>
+
+      <div class="right-col">
+        <div class="controls">
+          <button id="btnRestart">Перезапуск</button>
+          <button id="btnChange">Сменить локацию (L)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="auth panel">
+        <div><strong>Аккаунт (локально в браузере)</strong></div>
+        <input id="username" placeholder="Имя" />
+        <input id="password" type="password" placeholder="Пароль" />
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button id="btnRegisterUser">Регистрация</button>
+          <button id="btnLoginUser">Войти</button>
+        </div>
+        <div id="authMsg" class="small" style="margin-top:6px;min-height:18px"></div>
+        <div style="margin-top:8px;">Пользователь: <b id="currentUser">—</b> | Монеты: <b id="coins">0</b></div>
+      </div>
+
+      <div class="shop panel">
+        <div><strong>Магазин скинов</strong></div>
+        <div class="skins" id="skinsContainer"></div>
+        <div class="small" style="margin-top:6px">Скины применяются сразу и сохраняются в аккаунте.</div>
+      </div>
+    </div>
+
+    <canvas id="game" width="900" height="260"></canvas>
+    <div class="small">Управление: пробел или клик — прыжок, стрелка вниз — присесть, L — смена локации. На мобильных: тап — прыжок.</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const locNameEl = document.getElementById('locName');
+  const btnRestart = document.getElementById('btnRestart');
+  const btnChange = document.getElementById('btnChange');
+  const usernameInput = document.getElementById('username');
+  const passwordInput = document.getElementById('password');
+  const btnRegisterUser = document.getElementById('btnRegisterUser');
+  const btnLoginUser = document.getElementById('btnLoginUser');
+  const authMsg = document.getElementById('authMsg');
+  const currentUserEl = document.getElementById('currentUser');
+  const coinsEl = document.getElementById('coins');
+  const skinsContainer = document.getElementById('skinsContainer');
+
+  // Settings and state
+  const W = canvas.width;
+  const H = canvas.height;
+  const groundH = 40; // height of ground band
+
+  const locations = [
+    {name: 'Пустыня', sky:'#f6ecd7', ground:'#e5c07b', obstacle:'#6b4f2b', colorAccent:'#d6a95f'},
+    {name: 'Ночь', sky:'#05060a', ground:'#1b1f2a', obstacle:'#9ab3ff', colorAccent:'#6fa8ff'},
+    {name: 'Лес', sky:'#dff3e6', ground:'#6aa84f', obstacle:'#2f5b2f', colorAccent:'#3c8c3c'},
+    {name: 'Снег', sky:'#e8f0ff', ground:'#dbe9f7', obstacle:'#6f8aa3', colorAccent:'#9fb7d9'},
+  ];
+  let locIndex = 0;
+
+  let speed = 4; // ground speed
+  let gravity = 0.6;
+  let spawnTimer = 0;
+  let spawnInterval = 90;
+  let obstacles = [];
+  let particles = [];
+
+  let score = 0;
+  let globalBest = Number(localStorage.getItem('dino_best') || 0);
+  bestEl.textContent = globalBest;
+
+  let running = true;
+
+  // Player
+  const player = {
+    x: 80, y: 0, w: 44, h: 44, vy:0, onGround:true, duck:false
+  };
+  // compute baseY so player stands on ground
+  function computeBaseY(){ return H - groundH - player.h; }
+  player.baseY = computeBaseY();
+  player.y = player.baseY;
+
+  // Skins
+  const skins = [
+    {id:'default', name:'Классический', color:'#333', price:0},
+    {id:'red', name:'Красный', color:'#c33', price:50},
+    {id:'gold', name:'Золотой', color:'#d6a95f', price:120},
+    {id:'neon', name:'Неон', color:'#6fa8ff', price:90}
+  ];
+
+  // Auth (very simple local storage based)
+  function loadUsers(){ return JSON.parse(localStorage.getItem('dino_users') || '{}'); }
+  function saveUsers(users){ localStorage.setItem('dino_users', JSON.stringify(users)); }
+  function hashPwd(p){ let h=0; for(let i=0;i<p.length;i++){ h=(h<<5)-h + p.charCodeAt(i); h |= 0; } return String(h); }
+
+  let currentUser = null; // username string
+
+  function registerUser(name, pwd){ if(!name) return 'Введите имя'; const users = loadUsers(); if(users[name]) return 'Пользователь уже существует'; users[name] = {pwd:hashPwd(pwd), coins:0, purchased:['default'], selected:'default', best:0}; saveUsers(users); setAuth(name); return null; }
+  function loginUser(name, pwd){ const users = loadUsers(); if(!users[name]) return 'Нет такого пользователя'; if(users[name].pwd !== hashPwd(pwd)) return 'Неверный пароль'; setAuth(name); return null; }
+  function setAuth(name){ currentUser = name; currentUserEl.textContent = name; updateUserUI(); }
+  function logout(){ currentUser = null; currentUserEl.textContent = '—'; updateUserUI(); }
+
+  function getUserData(){ if(!currentUser) return null; const users = loadUsers(); return users[currentUser]; }
+  function saveUserData(data){ if(!currentUser) return; const users = loadUsers(); users[currentUser] = data; saveUsers(users); }
+
+  function updateUserUI(){ const u = getUserData(); coinsEl.textContent = u ? u.coins : 0; // show user's coins
+    // set applied skin
+    currentSkin = u ? u.selected : 'default'; applySkin(currentSkin);
+    renderSkins();
+  }
+
+  // Skin handling
+  let currentSkin = 'default';
+  function applySkin(skinId){ currentSkin = skinId; }
+
+  // UI events
+  btnRegisterUser.addEventListener('click', ()=>{ const name=usernameInput.value.trim(); const pwd=passwordInput.value; const err=registerUser(name,pwd); authMsg.textContent = err || 'Зарегистрировано и вошли'; if(!err) updateUserUI(); });
+  btnLoginUser.addEventListener('click', ()=>{ const name=usernameInput.value.trim(); const pwd=passwordInput.value; const err=loginUser(name,pwd); authMsg.textContent = err || 'Вход выполнен'; if(!err) updateUserUI(); });
+
+  // responsive scale (CSS scaled)
+  function resizeCanvas(){ const maxW = Math.min(window.innerWidth - 40, 1000); canvas.style.width = maxW + 'px'; }
+  window.addEventListener('resize', resizeCanvas); resizeCanvas();
+
+  // Input
+  const keys = {};
+  window.addEventListener('keydown', e=>{
+    if(e.code === 'Space'){ e.preventDefault(); jump(); }
+    if(e.key === 'ArrowDown') keys.down = true;
+    if(e.key === 'l' || e.key === 'L') changeLocation();
+    if(e.key === 'Escape') { if(currentUser) logout(); }
+  });
+  window.addEventListener('keyup', e=>{ if(e.key === 'ArrowDown') keys.down = false; });
+
+  canvas.addEventListener('mousedown', ()=>{ jump(); });
+  canvas.addEventListener('touchstart', (e)=>{ e.preventDefault(); jump(); }, {passive:false});
+
+  btnRestart.addEventListener('click', resetGame);
+  btnChange.addEventListener('click', changeLocation);
+
+  function jump(){ if(!running) { resetGame(); return; } if(player.onGround && !player.duck){ player.vy = -12; player.onGround = false; } }
+
+  function changeLocation(){ locIndex = (locIndex + 1) % locations.length; locNameEl.textContent = locations[locIndex].name; }
+
+  function resetGame(){ obstacles = []; particles = []; score = 0; speed = 4; spawnInterval = 90; running = true; player.baseY = computeBaseY(); player.y = player.baseY; player.vy = 0; player.onGround = true; player.duck = false; scoreEl.textContent = '0'; }
+
+  // Obstacles
+  function spawnObstacle(){ const types = ['cactus','bird','rock']; const t = types[Math.floor(Math.random()*types.length)]; let ob = {type:t, x:W + 20, w:20 + Math.random()*30, passed:false}; if(t === 'bird') { ob.h = 24; ob.y = H - groundH - ob.h - (20 + Math.random()*40); } else { ob.h = 30 + Math.random()*30; ob.y = H - groundH - ob.h; } obstacles.push(ob); }
+
+  function update(dt){ if(!running) return; speed += 0.0009 * dt; spawnTimer += 1; if(spawnTimer > spawnInterval){ spawnTimer = 0; spawnInterval = 60 + Math.random()*80; spawnObstacle(); }
+
+    // player physics
+    if(!player.onGround){ player.vy += gravity; player.y += player.vy; if(player.y >= player.baseY){ player.y = player.baseY; player.vy = 0; player.onGround = true; }}
+    // ducking state (only when on ground)
+    player.duck = !!keys.down && player.onGround;
+
+    // move obstacles and scoring
+    for(let i = obstacles.length -1; i >= 0; i--){ const ob = obstacles[i]; ob.x -= speed; if(ob.x + ob.w < -60) obstacles.splice(i,1); if(!ob.passed && ob.x + ob.w < player.x){ ob.passed = true; score += 10; createScoreParticle(ob.x + ob.w/2, ob.y); // coins for logged-in users
+        if(currentUser){ const u = getUserData(); u.coins = (u.coins || 0) + 1; saveUserData(u); updateUserUI(); }
+      }
+    }
+
+    // collision detection
+    for(const ob of obstacles){ if(hitTest(player, ob)) { gameOver(); break; } }
+
+    // score increments
+    score += 0.05 * dt; score = Math.floor(score); scoreEl.textContent = score;
+    if(score > globalBest){ globalBest = score; bestEl.textContent = globalBest; localStorage.setItem('dino_best', globalBest); }
+
+    // particles update
+    for(let i = particles.length -1; i>=0; i--){ const p = particles[i]; p.vy += 0.3; p.x += p.vx; p.y += p.vy; p.life -= 1; if(p.life<=0) particles.splice(i,1); }
+  }
+
+  function hitTest(p, ob){ // compute drawing rect depending duck so collider matches what's drawn
+    const drawH = p.duck ? Math.round(p.h * 0.55) : p.h;
+    const drawYoffset = p.duck ? Math.round(p.h - drawH) : 0; // amount shape is pushed down to keep bottom aligned
+    const pr = {x:p.x, y:p.y + drawYoffset, w:p.w, h:drawH};
+    const or = {x:ob.x, y:ob.y, w:ob.w, h:ob.h};
+    return rectsOverlap(pr, or);
+  }
+  function rectsOverlap(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+
+  function createScoreParticle(x,y){ particles.push({x,y,vx:(Math.random()-0.5)*2,vy:-3,life:50,text:'+10'}); }
+
+  function gameOver(){ running = false; // burst
+    for(let i=0;i<30;i++) particles.push({x:player.x+player.w/2,y:player.y, vx:(Math.random()-0.5)*6, vy:-Math.random()*6, life:80, text:''});
+    // save personal best
+    if(currentUser){ const u = getUserData(); if(score > (u.best||0)){ u.best = score; saveUserData(u); authMsg.textContent = 'Новый рекорд в аккаунте!'; } }
+  }
+
+  // Draw
+  function draw(){ ctx.clearRect(0,0,W,H); const loc = locations[locIndex]; // sky
+    ctx.fillStyle = loc.sky; ctx.fillRect(0,0,W,H);
+    drawParallax(loc);
+    // ground
+    ctx.fillStyle = loc.ground; ctx.fillRect(0, H-groundH, W, groundH);
+
+    // obstacles
+    for(const ob of obstacles) drawObstacle(ob, loc);
+
+    // player
+    drawPlayer(player, loc);
+
+    // particles
+    ctx.save(); ctx.globalAlpha = 0.95; for(const p of particles){ if(p.text){ ctx.fillStyle = '#fff'; ctx.font = '12px monospace'; ctx.fillText(p.text, p.x, p.y); } else { ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillRect(p.x,p.y,3,3); } } ctx.restore();
+
+    if(!running){ ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#fff'; ctx.font='24px sans-serif'; ctx.textAlign='center'; ctx.fillText('Игра окончена — нажмите Перезапуск или пробел', W/2, H/2); }
+  }
+
+  function drawParallax(loc){ ctx.save(); if(loc.name === 'Пустыня'){ ctx.fillStyle = loc.colorAccent; for(let i=0;i<6;i++){ ctx.globalAlpha = 0.12; ctx.beginPath(); const cx = (i*220 + (Date.now()/60 % 220)); ctx.ellipse(cx, H-70, 160, 30, 0, 0, Math.PI*2); ctx.fill(); } } else if(loc.name === 'Ночь'){ ctx.fillStyle = '#fff'; for(let i=0;i<60;i++){ const sx = (i*47)%W + (i*13%50); const sy = 30 + (i*37%80); ctx.globalAlpha = (i%7)/10 + 0.2; ctx.fillRect(sx,sy,2,2); } } else if(loc.name === 'Лес'){ ctx.fillStyle = loc.colorAccent; ctx.globalAlpha = 0.22; for(let i=0;i<10;i++){ const tx = i*90 + (Date.now()/80 % 90); ctx.fillRect(tx, H-120 - (i%3)*8, 24, 120); } } else if(loc.name === 'Снег'){ ctx.fillStyle = '#fff'; for(let i=0;i<80;i++){ const sx = (i*97)%W; const sy = (Date.now()/30 + i*23)%H; ctx.globalAlpha = 0.6; ctx.fillRect(sx,sy,2,2); } } ctx.restore(); }
+
+  function drawObstacle(ob, loc){ ctx.save(); ctx.fillStyle = loc.obstacle; if(ob.type === 'bird'){ ctx.fillRect(ob.x, ob.y, ob.w, ob.h); ctx.fillRect(ob.x+6, ob.y-6, 12, 6); } else if(ob.type === 'rock'){ ctx.beginPath(); ctx.ellipse(ob.x+ob.w/2, ob.y+ob.h/2, ob.w/2, ob.h/2, 0,0,Math.PI*2); ctx.fill(); } else { ctx.fillRect(ob.x, ob.y, ob.w/3, ob.h); ctx.fillRect(ob.x + ob.w/2, ob.y + ob.h*0.3, ob.w/3, ob.h*0.7); } ctx.restore(); }
+
+  function drawPlayer(p, loc){ ctx.save(); const px = p.x; const py = p.y; const pw = p.w; const ph = p.h; ctx.translate(px, py);
+    // decide skin color
+    const skinObj = skins.find(s => s.id === currentSkin) || skins[0];
+    const mainColor = skinObj.color || '#333';
+    // drawing keeping bottom aligned when ducking
+    const drawH = p.duck ? Math.round(ph * 0.55) : ph;
+    const drawY = p.duck ? (ph - drawH) : 0;
+    ctx.fillStyle = mainColor; ctx.fillRect(0, drawY, pw, drawH);
+    ctx.fillStyle = '#222'; ctx.fillRect(pw-6, drawY + 6, 6, Math.max(6, drawH*0.25)); // tail
+    // eye
+    ctx.fillStyle = '#fff'; ctx.fillRect(pw-18, drawY + 8, 6, 6);
+    ctx.fillStyle = '#000'; ctx.fillRect(pw-16, drawY + 10, 2, 2);
+    ctx.restore(); }
+
+  // Skins UI
+  function renderSkins(){ skinsContainer.innerHTML = ''; const u = getUserData(); const owned = (u && u.purchased) ? u.purchased : ['default']; for(const s of skins){ const card = document.createElement('div'); card.className = 'skin-card'; const preview = document.createElement('div'); preview.className = 'skin-preview'; preview.style.background = s.color; card.appendChild(preview); const title = document.createElement('div'); title.textContent = s.name; title.style.fontSize='13px'; card.appendChild(title); const price = document.createElement('div'); price.textContent = s.price===0 ? 'Бесплатно' : s.price + ' 💎'; price.style.fontSize='12px'; price.style.opacity=0.9; card.appendChild(price); const btn = document.createElement('button'); if(owned.indexOf(s.id)!==-1){ btn.textContent = (currentSkin===s.id) ? 'Выбран' : 'Применить'; btn.addEventListener('click', ()=>{ applySkin(s.id); if(currentUser){ const ud = getUserData(); ud.selected = s.id; saveUserData(ud); updateUserUI(); } else { currentSkin = s.id; updateUserUI(); } }); } else { btn.textContent = 'Купить'; btn.addEventListener('click', ()=>{ if(!currentUser){ authMsg.textContent = 'Сначала войдите или зарегистрируйтесь'; return; } const ud = getUserData(); if(ud.coins >= s.price){ ud.coins -= s.price; ud.purchased.push(s.id); ud.selected = s.id; saveUserData(ud); currentSkin = s.id; authMsg.textContent = 'Куплено!'; updateUserUI(); } else { authMsg.textContent = 'Недостаточно монет'; } }); }
+    card.appendChild(btn); skinsContainer.appendChild(card);
+  } }
+
+  // Main loop
+  let last = performance.now(); function loop(now){ const dt = Math.min(60, now - last); last = now; update(dt/16.67); draw(); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+
+  // initialize UI and skins
+  locNameEl.textContent = locations[locIndex].name;
+  renderSkins(); updateUserUI();
+
+})();
+</script>
+</body>
+</html>
