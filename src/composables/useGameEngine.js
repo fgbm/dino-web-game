@@ -8,6 +8,7 @@ export function useGameEngine(canvasRef) {
   const keys = ref({})
   const animationId = ref(null)
   let lastTime = 0
+  let gameStartTime = 0 // Время начала игры
 
   // Константы
   const CANVAS_WIDTH = 900
@@ -23,6 +24,7 @@ export function useGameEngine(canvasRef) {
       
       setupEventListeners()
       startGameLoop()
+      gameStartTime = Date.now() // Запоминаем время начала игры
     }
   })
 
@@ -176,7 +178,27 @@ export function useGameEngine(canvasRef) {
 
       // Проверка коллизий
       if (checkCollision(gameState.player, obstacle)) {
-        gameActions.gameOver()
+        // Вызываем gameOver из gameStore с дополнительной логикой
+        gameState.running = false
+        // Создаем эффект взрыва
+        for (let i = 0; i < 30; i++) {
+          gameState.particles.push({
+            x: gameState.player.x + gameState.player.w / 2,
+            y: gameState.player.y,
+            vx: (Math.random() - 0.5) * 6,
+            vy: -Math.random() * 6,
+            life: 80,
+            text: ''
+          })
+        }
+        
+        // Рассчитываем продолжительность игры
+        const gameDuration = (Date.now() - gameStartTime) / 1000 // в секундах
+        
+        // Сохраняем результат игры, если пользователь авторизован
+        if (authActions.currentUser) {
+          authActions.saveGameResult(gameState.score, Math.floor(gameDuration))
+        }
         
         // Обновляем рекорд пользователя
         if (authActions.currentUser) {
@@ -236,6 +258,30 @@ export function useGameEngine(canvasRef) {
            a.y + a.h > b.y
   }
 
+  function gameOver() {
+    gameState.running = false
+    
+    // Создаем эффект взрыва
+    for (let i = 0; i < 30; i++) {
+      gameState.particles.push({
+        x: gameState.player.x + gameState.player.w / 2,
+        y: gameState.player.y,
+        vx: (Math.random() - 0.5) * 6,
+        vy: -Math.random() * 6,
+        life: 80,
+        text: ''
+      })
+    }
+    
+    // Рассчитываем продолжительность игры
+    const gameDuration = (Date.now() - gameStartTime) / 1000 // в секундах
+    
+    // Сохраняем результат игры, если пользователь авторизован
+    if (authActions.currentUser) {
+      authActions.saveGameResult(gameState.score, Math.floor(gameDuration))
+    }
+  }
+
   function draw() {
     if (!ctx.value) return
 
@@ -250,9 +296,16 @@ export function useGameEngine(canvasRef) {
     // Параллакс фон
     drawParallax(location)
 
-    // Земля
+    // Земля с улучшенным дизайном
     ctx.value.fillStyle = location.ground
     ctx.value.fillRect(0, CANVAS_HEIGHT - GROUND_HEIGHT, CANVAS_WIDTH, GROUND_HEIGHT)
+    
+    // Добавляем текстуру земли
+    ctx.value.fillStyle = darkenColor(location.ground, 10)
+    for (let i = 0; i < CANVAS_WIDTH; i += 20) {
+      // Небольшие неровности на земле
+      ctx.value.fillRect(i, CANVAS_HEIGHT - GROUND_HEIGHT, 10, 2)
+    }
 
     // Препятствия
     gameState.obstacles.forEach(obstacle => drawObstacle(obstacle, location))
@@ -273,36 +326,70 @@ export function useGameEngine(canvasRef) {
     ctx.value.save()
 
     if (location.name === 'Пустыня') {
+      // Пустыня - холмы с улучшенным дизайном
       ctx.value.fillStyle = location.colorAccent
       for (let i = 0; i < 6; i++) {
         ctx.value.globalAlpha = 0.12
         ctx.value.beginPath()
         const cx = (i * 220 + (Date.now() / 60 % 220))
-        ctx.value.ellipse(cx, CANVAS_HEIGHT - 70, 160, 30, 0, 0, Math.PI * 2)
+        // Рисуем холмы с улучшенной формой
+        ctx.value.moveTo(cx - 160, CANVAS_HEIGHT - 70)
+        ctx.value.bezierCurveTo(
+          cx - 80, CANVAS_HEIGHT - 100,
+          cx + 80, CANVAS_HEIGHT - 100,
+          cx + 160, CANVAS_HEIGHT - 70
+        )
+        ctx.value.lineTo(cx + 160, CANVAS_HEIGHT)
+        ctx.value.lineTo(cx - 160, CANVAS_HEIGHT)
+        ctx.value.closePath()
         ctx.value.fill()
       }
     } else if (location.name === 'Ночь') {
-      ctx.value.fillStyle = '#fff'
+      // Ночь - звезды с улучшенным дизайном
       for (let i = 0; i < 60; i++) {
         const sx = (i * 47) % CANVAS_WIDTH + (i * 13 % 50)
         const sy = 30 + (i * 37 % 80)
         ctx.value.globalAlpha = (i % 7) / 10 + 0.2
-        ctx.value.fillRect(sx, sy, 2, 2)
+        ctx.value.fillStyle = '#fff'
+        ctx.value.beginPath()
+        ctx.value.arc(sx, sy, 1.5, 0, Math.PI * 2)
+        ctx.value.fill()
       }
+      // Луна
+      ctx.value.globalAlpha = 0.7
+      ctx.value.fillStyle = '#eee'
+      ctx.value.beginPath()
+      ctx.value.arc(800, 60, 20, 0, Math.PI * 2)
+      ctx.value.fill()
     } else if (location.name === 'Лес') {
+      // Лес - деревья с улучшенным дизайном
       ctx.value.fillStyle = location.colorAccent
       ctx.value.globalAlpha = 0.22
       for (let i = 0; i < 10; i++) {
         const tx = i * 90 + (Date.now() / 80 % 90)
-        ctx.value.fillRect(tx, CANVAS_HEIGHT - 120 - (i % 3) * 8, 24, 120)
+        // Рисуем деревья с улучшенной формой
+        ctx.value.beginPath()
+        ctx.value.moveTo(tx, CANVAS_HEIGHT - 120 - (i % 3) * 8)
+        ctx.value.lineTo(tx - 12, CANVAS_HEIGHT - 70)
+        ctx.value.lineTo(tx + 12, CANVAS_HEIGHT - 70)
+        ctx.value.closePath()
+        ctx.value.fill()
+        
+        // Ствол дерева
+        ctx.value.fillStyle = '#8B4513'
+        ctx.value.fillRect(tx - 2, CANVAS_HEIGHT - 120 - (i % 3) * 8, 4, 50)
+        ctx.value.fillStyle = location.colorAccent
       }
     } else if (location.name === 'Снег') {
+      // Снег - снежинки с улучшенным дизайном
       ctx.value.fillStyle = '#fff'
       for (let i = 0; i < 80; i++) {
         const sx = (i * 97) % CANVAS_WIDTH
         const sy = (Date.now() / 30 + i * 23) % CANVAS_HEIGHT
         ctx.value.globalAlpha = 0.6
-        ctx.value.fillRect(sx, sy, 2, 2)
+        ctx.value.beginPath()
+        ctx.value.arc(sx, sy, 1.5, 0, Math.PI * 2)
+        ctx.value.fill()
       }
     }
 
@@ -314,9 +401,21 @@ export function useGameEngine(canvasRef) {
     ctx.value.fillStyle = location.obstacle
 
     if (obstacle.type === 'bird') {
-      ctx.value.fillRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h)
-      ctx.value.fillRect(obstacle.x + 6, obstacle.y - 6, 12, 6)
+      // Птица с улучшенным дизайном
+      ctx.value.fillStyle = location.obstacle
+      ctx.value.fillRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h) // тело
+      
+      // Крыло
+      ctx.value.fillStyle = darkenColor(location.obstacle, 15)
+      ctx.value.fillRect(obstacle.x + 4, obstacle.y - 4, obstacle.w - 8, 4)
+      
+      // Глаз
+      ctx.value.fillStyle = '#000'
+      ctx.value.beginPath()
+      ctx.value.arc(obstacle.x + obstacle.w - 4, obstacle.y + obstacle.h/2, 2, 0, Math.PI * 2)
+      ctx.value.fill()
     } else if (obstacle.type === 'rock') {
+      // Камень с улучшенным дизайном
       ctx.value.beginPath()
       ctx.value.ellipse(
         obstacle.x + obstacle.w / 2,
@@ -326,14 +425,42 @@ export function useGameEngine(canvasRef) {
         0, 0, Math.PI * 2
       )
       ctx.value.fill()
+      
+      // Тени для объема
+      ctx.value.fillStyle = darkenColor(location.obstacle, 20)
+      ctx.value.beginPath()
+      ctx.value.ellipse(
+        obstacle.x + obstacle.w / 3,
+        obstacle.y + obstacle.h / 3,
+        obstacle.w / 4,
+        obstacle.h / 4,
+        0, 0, Math.PI * 2
+      )
+      ctx.value.fill()
     } else { // cactus
-      ctx.value.fillRect(obstacle.x, obstacle.y, obstacle.w / 3, obstacle.h)
+      // Кактус с улучшенным дизайном
+      ctx.value.fillStyle = location.obstacle
+      ctx.value.fillRect(obstacle.x, obstacle.y, obstacle.w / 3, obstacle.h) // основной ствол
+      
+      // Боковые ветки
       ctx.value.fillRect(
         obstacle.x + obstacle.w / 2,
         obstacle.y + obstacle.h * 0.3,
         obstacle.w / 3,
-        obstacle.h * 0.7
+        obstacle.h * 0.4
       )
+      
+      // Вертикальная ветка
+      ctx.value.fillRect(
+        obstacle.x - obstacle.w * 0.3,
+        obstacle.y + obstacle.h * 0.2,
+        obstacle.w / 3,
+        obstacle.h * 0.3
+      )
+      
+      // Тени для объема
+      ctx.value.fillStyle = darkenColor(location.obstacle, 15)
+      ctx.value.fillRect(obstacle.x, obstacle.y, obstacle.w / 6, obstacle.h)
     }
 
     ctx.value.restore()
@@ -351,21 +478,59 @@ export function useGameEngine(canvasRef) {
 
     ctx.value.translate(player.x, player.y)
 
-    // Тело
+    // Тело динозавра (улучшенный дизайн)
     ctx.value.fillStyle = mainColor
     ctx.value.fillRect(0, drawY, player.w, drawH)
+    
+    // Добавляем тень для объема
+    ctx.value.fillStyle = darkenColor(mainColor, 20)
+    ctx.value.fillRect(0, drawY, 4, drawH)
+    
+    // Глаз (улучшенный дизайн)
+    ctx.value.fillStyle = '#fff'
+    ctx.value.beginPath()
+    ctx.value.ellipse(player.w - 18, drawY + 8, 4, 4, 0, 0, Math.PI * 2)
+    ctx.value.fill()
+    
+    ctx.value.fillStyle = '#000'
+    ctx.value.beginPath()
+    ctx.value.ellipse(player.w - 16, drawY + 10, 2, 2, 0, 0, Math.PI * 2)
+    ctx.value.fill()
+
+    // Ноги
+    ctx.value.fillStyle = darkenColor(mainColor, 15)
+    if (!player.onGround) {
+      // Если прыгает, то ноги в воздухе
+      ctx.value.fillRect(6, drawY + drawH - 4, 6, 4) // передняя нога
+      ctx.value.fillRect(18, drawY + drawH - 4, 6, 4) // задняя нога
+    } else {
+      // Если на земле, анимация бега
+      const legOffset = Math.sin(Date.now() / 100) * 2
+      ctx.value.fillRect(6, drawY + drawH - 4, 6, 4) // передняя нога
+      ctx.value.fillRect(18, drawY + drawH - 4 + legOffset, 6, 4) // задняя нога
+    }
 
     // Хвост
-    ctx.value.fillStyle = '#222'
-    ctx.value.fillRect(player.w - 6, drawY + 6, 6, Math.max(6, drawH * 0.25))
-
-    // Глаз
-    ctx.value.fillStyle = '#fff'
-    ctx.value.fillRect(player.w - 18, drawY + 8, 6, 6)
-    ctx.value.fillStyle = '#000'
-    ctx.value.fillRect(player.w - 16, drawY + 10, 2, 2)
+    ctx.value.fillStyle = darkenColor(mainColor, 10)
+    ctx.value.fillRect(player.w - 6, drawY + 6, 8, Math.max(4, drawH * 0.25))
+    
+    // Если присел, рисуем только верхнюю часть
+    if (player.duck) {
+      ctx.value.fillStyle = darkenColor(mainColor, 5)
+      ctx.value.fillRect(0, drawY, player.w - 6, 4) // спина
+    }
 
     ctx.value.restore()
+  }
+
+  // Вспомогательная функция для затемнения цвета
+  function darkenColor(color, percent) {
+    // Простая реализация для основных цветов
+    if (color === '#333') return '#222'
+    if (color === '#c33') return '#900'
+    if (color === '#d6a95f') return '#b88c3c'
+    if (color === '#6fa8ff') return '#4d79cc'
+    return '#222' // цвет по умолчанию для теней
   }
 
   function drawParticles() {
@@ -374,12 +539,21 @@ export function useGameEngine(canvasRef) {
 
     gameState.particles.forEach(particle => {
       if (particle.text) {
+        // Текстовые частицы (например, +10 очков)
         ctx.value.fillStyle = '#fff'
-        ctx.value.font = '12px monospace'
+        ctx.value.font = 'bold 14px sans-serif'
+        ctx.value.textAlign = 'center'
         ctx.value.fillText(particle.text, particle.x, particle.y)
+        
+        // Добавляем тень для текста
+        ctx.value.fillStyle = 'rgba(0, 0, 0, 0.5)'
+        ctx.value.fillText(particle.text, particle.x + 1, particle.y + 1)
       } else {
+        // Обычные частицы
         ctx.value.fillStyle = 'rgba(255, 255, 255, 0.8)'
-        ctx.value.fillRect(particle.x, particle.y, 3, 3)
+        ctx.value.beginPath()
+        ctx.value.arc(particle.x, particle.y, 2, 0, Math.PI * 2)
+        ctx.value.fill()
       }
     })
 
@@ -387,17 +561,25 @@ export function useGameEngine(canvasRef) {
   }
 
   function drawGameOverScreen() {
-    ctx.value.fillStyle = 'rgba(0, 0, 0, 0.45)'
+    // Полупрозрачный оверлей
+    ctx.value.fillStyle = 'rgba(0, 0, 0, 0.6)'
     ctx.value.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
     
+    // Центральный текст с улучшенным дизайном
     ctx.value.fillStyle = '#fff'
-    ctx.value.font = '24px sans-serif'
+    ctx.value.font = 'bold 28px sans-serif'
     ctx.value.textAlign = 'center'
-    ctx.value.fillText(
-      'Игра окончена — нажмите Перезапуск или пробел',
-      CANVAS_WIDTH / 2,
-      CANVAS_HEIGHT / 2
-    )
+    ctx.value.fillText('Игра окончена!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20)
+    
+    // Подсказка с улучшенным дизайном
+    ctx.value.font = '16px sans-serif'
+    ctx.value.fillStyle = 'rgba(255, 255, 255, 0.8)'
+    ctx.value.fillText('Нажмите Пробел или Перезапуск для новой игры', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20)
+    
+    // Отображаем текущий счет
+    ctx.value.font = 'bold 20px sans-serif'
+    ctx.value.fillStyle = '#6fa8ff'
+    ctx.value.fillText(`Счёт: ${gameState.score}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60)
   }
 
   return {

@@ -55,7 +55,10 @@ export const authActions = {
       coins: 0,
       purchased: ['default'],
       selected: 'default',
-      best: 0
+      best: 0,
+      registrationDate: new Date().toISOString(),
+      totalTimePlayed: 0,
+      recentGames: [] // Массив для хранения истории игр
     }
 
     userUtils.saveUsers(users)
@@ -133,6 +136,27 @@ export const authActions = {
       return true
     }
     return false
+  },
+
+  // Новая функция для сохранения результата игры
+  saveGameResult(score, duration = 0) {
+    const userData = this.getUserData()
+    if (!userData) return
+
+    // Добавляем новую запись в историю игр
+    const gameRecord = {
+      date: new Date().toISOString(),
+      score: score,
+      duration: duration // продолжительность игры в секундах
+    }
+
+    // Добавляем в начало массива (новые игры первыми)
+    userData.recentGames = [gameRecord, ...(userData.recentGames || [])].slice(0, 20) // Ограничиваем 20 последними играми
+    
+    // Обновляем общее время игры
+    userData.totalTimePlayed = (userData.totalTimePlayed || 0) + duration
+    
+    this.saveUserData(userData)
   },
 
   clearMessage() {
